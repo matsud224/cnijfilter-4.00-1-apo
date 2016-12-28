@@ -1,0 +1,122 @@
+diff -uprN cnijfilter-source-4.00-1/lgmon2/src/cnijlgmon2.c cnijfilter-source-4.00-1-apo/lgmon2/src/cnijlgmon2.c
+--- cnijfilter-source-4.00-1/lgmon2/src/cnijlgmon2.c	2013-07-17 10:33:45.000000000 +0900
++++ cnijfilter-source-4.00-1-apo/lgmon2/src/cnijlgmon2.c	2016-12-28 15:01:06.922128087 +0900
+@@ -39,6 +39,8 @@
+ 
+ //#define _DEBUG_MODE_
+ 
++#define POWERON_COMMAND "<?xml version=\"1.0\" encoding=\"utf-8\" ?><cmd xmlns:ivec=\"http://www.canon.com/ns/cmd/2008/07/common/\"><ivec:contents><ivec:operation>PowerOn</ivec:operation><ivec:param_set servicetype=\"device\"><ivec:poweronmode>ModeA</ivec:poweronmode></ivec:param_set></ivec:contents></cmd>"
++
+ int interrupt_sign = 0;
+ int (*CLSS_GetPrintCommand)(char *, int, int *, char *, int);
+ int (*CLSS_GetResponse)(char *, int, int *, char *, int **);
+@@ -80,7 +82,7 @@ int (*CLSS_GetStatus)(char *, int, int *
+ 	bind_textdomain_codeset( PACKAGE, "UTF-8" );
+ 	textdomain( PACKAGE );
+ 
+-	SetKeyTextDir( PACKAGE_DATA_DIR );
++	SetKeyTextDir( "/usr/local/share/cnijlgmon2" /*PACKAGE_DATA_DIR*/ );
+ 	if ( LoadKeyTextList() != 0 ){
+ #ifdef _DEBUG_MODE_
+ 		fprintf(stderr, "DEBUG: lgmon2 LoadKeyTextList failed.\n");
+@@ -292,28 +294,7 @@ int (*CLSS_GetStatus)(char *, int, int *
+ 			sleep(30);
+ 		}
+ 	} while (err < 0);
+-	
+-	/*---------------clear printer buffer----------------------*/
+-	err = CNIF_GetResponse(&if_info, temp_job, &response_detail);
+-	if(err < 0) {
+-		err = CN_LGMON_RESPONSE_ERROR;
+-		goto onErr;
+-	}
+-	
+-	while(1) {
+-		err = CNIF_GetResponse(&if_info, temp_job, &response_detail);
+-		if (err >= 0) {
+-			if(err == CN_IVEC_STATUS_DETAIL_BUSYING) {
+-				sleep(10);
+-				continue;
+-			}
+-			break;
+-		} else {
+-			err = CN_LGMON_RESPONSE_ERROR;
+-			goto onErr;
+-		}
+-	}
+-	
++
+ 	/*--------------start session-----------------*/
+ 	while (1){
+ 		/* check intterrupt signal */
+@@ -342,9 +323,69 @@ int (*CLSS_GetStatus)(char *, int, int *
+ 			continue;
+ 		}
+ 	}
++
++	/*---------------PowerOn---------------------------*/
++	strncpy(job_id, CN_START_JOBID, sizeof(CN_START_JOBID));
++	strncpy(cmd_buffer, POWERON_COMMAND, CN_READ_SIZE);
++	cmd_size = strnlen(cmd_buffer, CN_READ_SIZE);
++	
++	/* send poweron command */
++	for( ; cmd_size != 0; cmd_size -= transfered_data) {
++		err = CNIF_Write(&if_info, (uint8_t *)cmd_buffer, cmd_size, &transfered_data);
++		if(err < 0) {
++
++#ifdef _DEBUG_MODE_
++			fprintf(stderr, "ERROR: send poweron error(%d)\n", err);
++#endif
++			err = CN_LGMON_WRITEDATA_ERROR;
++			goto onErr;
++		}
++		
++#ifdef _DEBUG_MODE_
++		fprintf(stderr, "DEBUG: send poweron = %d\n", transfered_data);
++#endif
++
++	}
++	/* check response */
++	while(1) {
++		/* check intterrupt signal */
++		if(interrupt_sign == 1){
++			fprintf(stderr, "INFO: \n");
++			goto onErr;
++		}
++		sleep(1);
++		err = CNIF_GetResponse(&if_info, job_id, &response_detail);
++		
++		if(err < 0){
++			err = CN_LGMON_RESPONSE_ERROR;
++			goto onErr;
++		}else{
++			break;
++		}
++	}
++	
++	/*---------------clear printer buffer----------------------*/
++	err = CNIF_GetResponse(&if_info, temp_job, &response_detail);
++	if(err < 0) {
++		err = CN_LGMON_RESPONSE_ERROR;
++		goto onErr;
++	}
++	
++	while(1) {
++		err = CNIF_GetResponse(&if_info, temp_job, &response_detail);
++		if (err >= 0) {
++			if(err == CN_IVEC_STATUS_DETAIL_BUSYING) {
++				sleep(10);
++				continue;
++			}
++			break;
++		} else {
++			err = CN_LGMON_RESPONSE_ERROR;
++			goto onErr;
++		}
++	}
+ 	
+ 	/*---------------StartJobCommand---------------------------*/
+-	strncpy(job_id, CN_START_JOBID, sizeof(CN_START_JOBID));
+ 	err = CNIF_GetPrintCommand(cmd_buffer, &cmd_size, job_id, CN_IVEC_STARTJOB);
+ 	if(err < 0) {
+ 		err = CN_LGMON_OTHER_ERROR;
